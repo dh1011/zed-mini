@@ -1,73 +1,28 @@
 # Zed Mini
 
-Zed Mini is an unofficial modified fork of [Zed](https://github.com/zed-industries/zed), focused on local text editing.
+Zed Mini is a minimal fork of [Zed](https://github.com/zed-industries/zed), focused on local text editing.
 
-The original Zed project is developed by Zed Industries, Inc. This fork is not affiliated with or endorsed by Zed Industries.
+I like Zed a lot. The design is beautiful and it is fast. But for my own use, I want a focused editor rather than a full IDE, so this fork strips out features I do not use.
 
-## Licensing
+Zed Mini removes:
 
-Zed Mini is based on Zed source code, which is licensed primarily under GPL-3.0-or-later, with Apache-2.0 components where marked. See [LICENSE-GPL](LICENSE-GPL) and [LICENSE-APACHE](LICENSE-APACHE).
+- AI features
+- Terminal integration
+- Plugin runtime
+- Collaboration
+- Cloud sign-in
+- Telemetry and feedback flows
+- Auto-update
+- GitHub integration
+- Local git/libgit2 integration
+- Project diagnostics
+- App database persistence
 
-This repository contains modified source code. Binary distributions should include the corresponding source code, these license files, and dependency license attributions.
+It keeps the core editing experience and LSP support for language-aware editing.
 
-## Development tips
+The executable is down from roughly `400 MB` to around `100 MB`.
 
-### Dependencies
+Currently macOS Apple Silicon only.
 
-* Install [Postgres.app](https://postgresapp.com) and start it.
-* Install the `LiveKit` server and the `foreman` process supervisor:
-
-    ```
-    brew install livekit
-    brew install foreman
-    ```
-
-* Ensure the Zed.dev website is checked out in a sibling directory:
-
-    ```
-    cd ..
-    git clone https://github.com/zed-industries/zed.dev
-    ```
-
-* Initialize submodules
-
-    ```
-    git submodule update --init --recursive
-    ```
-
-* Set up a local `zed` database and seed it with some initial users:
-
-    Create a personal GitHub token to run `script/bootstrap` once successfully. Then delete that token.
-
-    ```
-    GITHUB_TOKEN=<$token> script/bootstrap
-    ```
-
-### Testing against locally-running servers
-
-Start the web and collab servers:
-
-```
-foreman start
-```
-
-If you want to run Zed pointed at the local servers, you can run:
-
-```
-script/zed-with-local-servers
-# or...
-script/zed-with-local-servers --release
-```
-
-### Dump element JSON
-
-If you trigger `cmd-alt-i`, Zed will copy a JSON representation of the current window contents to the clipboard. You can paste this in a tool like [DJSON](https://chrome.google.com/webstore/detail/djson-json-viewer-formatt/chaeijjekipecdajnijdldjjipaegdjc?hl=en) to navigate the state of on-screen elements in a structured way.
-
-### Dependency Licensing
-
-We use [`cargo-about`](https://github.com/EmbarkStudios/cargo-about) to automatically comply with open source licenses. If CI is failing, check the following:
-
-- Is it showing a `no license specified` error for a crate you've created? If so, add `publish = false` under `[package]` in your crate's Cargo.toml.
-- Is the error `failed to satisfy license requirements` for a dependency? If so, first determine what license the project has and whether this system is sufficient to comply with this license's requirements. If you're unsure, ask a lawyer. Once you've verified that this system is acceptable add the license's SPDX identifier to the `accepted` array in `script/licenses/zed-licenses.toml`.
-- Is `cargo-about` unable to find the license for a dependency? If so, add a clarification field at the end of `script/licenses/zed-licenses.toml`, as specified in the [cargo-about book](https://embarkstudios.github.io/cargo-about/cli/generate/config.html#crate-configuration).
-
+---
+Zed Mini is an unofficial modified fork of [Zed](https://github.com/zed-industries/zed) and is not affiliated with or endorsed by Zed Industries. See [LICENSE-GPL](LICENSE-GPL) and [LICENSE-APACHE](LICENSE-APACHE).
