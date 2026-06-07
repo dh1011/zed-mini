@@ -19,7 +19,6 @@ test-support = [
 ]
 
 [dependencies]
-db = { path = "../db" }
 call = { path = "../call" }
 client = { path = "../client" }
 collections = { path = "../collections" }
@@ -32,7 +31,6 @@ language = { path = "../language" }
 menu = { path = "../menu" }
 project = { path = "../project" }
 settings = { path = "../settings" }
-terminal = { path = "../terminal" }
 theme = { path = "../theme" }
 util = { path = "../util" }
 async-recursion = "1.0.0"
@@ -58,4 +56,3 @@ gpui = { path = "../gpui", features = ["test-support"] }
 project = { path = "../project", features = ["test-support"] }
 settings = { path = "../settings", features = ["test-support"] }
 fs = { path = "../fs", features = ["test-support"] }
-db = { path = "../db", features = ["test-support"] }

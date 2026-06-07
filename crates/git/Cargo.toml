@@ -20,7 +20,7 @@ smol = "1.2"
 parking_lot = "0.11.1"
 async-trait = "0.1"
 futures = "0.3"
-git2 = { version = "0.15", default-features = false }
+similar = "1.3"
 
 [dev-dependencies]
 unindent = "0.1.7"

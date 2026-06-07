@@ -5,7 +5,7 @@ use crate::{
     dock::{icon_for_dock_anchor, AnchorDockBottom, AnchorDockRight, ExpandDock, HideDock},
     item::WeakItemHandle,
     toolbar::Toolbar,
-    Item, NewFile, NewSearch, NewTerminal, Workspace,
+    Item, NewFile, NewSearch, Workspace,
 };
 use anyhow::Result;
 use collections::{HashMap, HashSet, VecDeque};
@@ -1140,7 +1140,6 @@ impl Pane {
                 AnchorCorner::TopRight,
                 vec![
                     ContextMenuItem::item("New File", NewFile),
-                    ContextMenuItem::item("New Terminal", NewTerminal),
                     ContextMenuItem::item("New Search", NewSearch),
                 ],
                 cx,

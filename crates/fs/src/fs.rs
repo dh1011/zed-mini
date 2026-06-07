@@ -3,7 +3,6 @@ pub mod repository;
 use anyhow::{anyhow, Result};
 use fsevent::EventStream;
 use futures::{future::BoxFuture, Stream, StreamExt};
-use git2::Repository as LibGitRepository;
 use lazy_static::lazy_static;
 use parking_lot::Mutex as SyncMutex;
 use regex::Regex;
@@ -22,7 +21,6 @@ use std::{
     time::{Duration, SystemTime},
 };
 use tempfile::NamedTempFile;
-use util::ResultExt;
 
 #[cfg(any(test, feature = "test-support"))]
 use collections::{btree_map, BTreeMap};
@@ -350,12 +348,8 @@ impl Fs for RealFs {
         })))
     }
 
-    fn open_repo(&self, dotgit_path: &Path) -> Option<Arc<SyncMutex<dyn GitRepository>>> {
-        LibGitRepository::open(&dotgit_path)
-            .log_err()
-            .and_then::<Arc<SyncMutex<dyn GitRepository>>, _>(|libgit_repository| {
-                Some(Arc::new(SyncMutex::new(libgit_repository)))
-            })
+    fn open_repo(&self, _dotgit_path: &Path) -> Option<Arc<SyncMutex<dyn GitRepository>>> {
+        None
     }
 
     fn is_fake(&self) -> bool {

@@ -10,7 +10,6 @@ pub use isahc::{
 };
 use smol::future::FutureExt;
 use std::{sync::Arc, time::Duration};
-pub use url::Url;
 
 pub type Request = isahc::Request<AsyncBody>;
 pub type Response = isahc::Response<AsyncBody>;

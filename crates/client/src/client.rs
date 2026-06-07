@@ -2,21 +2,14 @@
 pub mod test;
 
 pub mod http;
-pub mod telemetry;
 pub mod user;
 
-use anyhow::{anyhow, Context, Result};
-use async_recursion::async_recursion;
-use async_tungstenite::tungstenite::{
-    error::Error as WebsocketError,
-    http::{Request, StatusCode},
-};
-use futures::{future::LocalBoxFuture, AsyncReadExt, FutureExt, SinkExt, StreamExt, TryStreamExt};
+use anyhow::{anyhow, Result};
+use futures::{future::LocalBoxFuture, FutureExt, StreamExt};
 use gpui::{
-    actions,
-    serde_json::{self, Value},
-    AnyModelHandle, AnyViewHandle, AnyWeakModelHandle, AnyWeakViewHandle, AppContext, AppVersion,
-    AsyncAppContext, Entity, ModelHandle, MutableAppContext, Task, View, ViewContext, ViewHandle,
+    actions, serde_json::Value, AnyModelHandle, AnyViewHandle, AnyWeakModelHandle,
+    AnyWeakViewHandle, AppContext, AppVersion, AsyncAppContext, Entity, ModelHandle,
+    MutableAppContext, Task, View, ViewContext, ViewHandle,
 };
 use http::HttpClient;
 use lazy_static::lazy_static;
@@ -24,37 +17,23 @@ use parking_lot::RwLock;
 use postage::watch;
 use rand::prelude::*;
 use rpc::proto::{AnyTypedEnvelope, EntityMessage, EnvelopedMessage, PeerId, RequestMessage};
-use serde::Deserialize;
-use settings::{Settings, TelemetrySettings};
+use settings::TelemetrySettings;
 use std::{
     any::TypeId,
     collections::HashMap,
-    convert::TryFrom,
-    fmt::Write as _,
     future::Future,
     marker::PhantomData,
     path::PathBuf,
     sync::{Arc, Weak},
     time::{Duration, Instant},
 };
-use telemetry::Telemetry;
 use thiserror::Error;
-use url::Url;
-use util::channel::ReleaseChannel;
 use util::{ResultExt, TryFutureExt};
 
 pub use rpc::*;
 pub use user::*;
 
 lazy_static! {
-    pub static ref ZED_SERVER_URL: String =
-        std::env::var("ZED_SERVER_URL").unwrap_or_else(|_| "https://zed.dev".to_string());
-    pub static ref IMPERSONATE_LOGIN: Option<String> = std::env::var("ZED_IMPERSONATE")
-        .ok()
-        .and_then(|s| if s.is_empty() { None } else { Some(s) });
-    pub static ref ADMIN_API_TOKEN: Option<String> = std::env::var("ZED_ADMIN_API_TOKEN")
-        .ok()
-        .and_then(|s| if s.is_empty() { None } else { Some(s) });
     pub static ref ZED_APP_VERSION: Option<AppVersion> = std::env::var("ZED_APP_VERSION")
         .ok()
         .and_then(|v| v.parse().ok());
@@ -62,9 +41,7 @@ lazy_static! {
         std::env::var("ZED_APP_PATH").ok().map(PathBuf::from);
 }
 
-pub const ZED_SECRET_CLIENT_TOKEN: &str = "618033988749894";
 pub const INITIAL_RECONNECTION_DELAY: Duration = Duration::from_millis(100);
-pub const CONNECTION_TIMEOUT: Duration = Duration::from_secs(5);
 
 actions!(client, [SignIn, SignOut]);
 
@@ -95,7 +72,6 @@ pub struct Client {
     id: usize,
     peer: Arc<Peer>,
     http: Arc<dyn HttpClient>,
-    telemetry: Arc<Telemetry>,
     state: RwLock<ClientState>,
 
     #[allow(clippy::type_complexity)]
@@ -133,21 +109,6 @@ pub enum EstablishConnectionError {
     Http(#[from] http::Error),
     #[error("{0}")]
     Io(#[from] std::io::Error),
-    #[error("{0}")]
-    Websocket(#[from] async_tungstenite::tungstenite::http::Error),
-}
-
-impl From<WebsocketError> for EstablishConnectionError {
-    fn from(error: WebsocketError) -> Self {
-        if let WebsocketError::Http(response) = &error {
-            match response.status() {
-                StatusCode::UNAUTHORIZED => return EstablishConnectionError::Unauthorized,
-                StatusCode::UPGRADE_REQUIRED => return EstablishConnectionError::UpgradeRequired,
-                _ => {}
-            }
-        }
-        EstablishConnectionError::Other(error.into())
-    }
 }
 
 impl EstablishConnectionError {
@@ -323,11 +284,10 @@ impl<T: Entity> Drop for PendingEntitySubscription<T> {
 }
 
 impl Client {
-    pub fn new(http: Arc<dyn HttpClient>, cx: &AppContext) -> Arc<Self> {
+    pub fn new(http: Arc<dyn HttpClient>, _cx: &AppContext) -> Arc<Self> {
         Arc::new(Self {
             id: 0,
             peer: Peer::new(0),
-            telemetry: Telemetry::new(http.clone(), cx),
             http,
             state: Default::default(),
 
@@ -443,9 +403,6 @@ impl Client {
                 }));
             }
             Status::SignedOut | Status::UpgradeRequired => {
-                let telemetry_settings = cx.read(|cx| cx.global::<Settings>().telemetry());
-                self.telemetry
-                    .set_authenticated_user_info(None, false, telemetry_settings);
                 state._reconnect_task.take();
             }
             _ => {}
@@ -693,120 +650,17 @@ impl Client {
         }
     }
 
-    pub fn has_keychain_credentials(&self, cx: &AsyncAppContext) -> bool {
-        read_credentials_from_keychain(cx).is_some()
+    pub fn has_keychain_credentials(&self, _cx: &AsyncAppContext) -> bool {
+        false
     }
 
-    #[async_recursion(?Send)]
     pub async fn authenticate_and_connect(
         self: &Arc<Self>,
-        try_keychain: bool,
+        _try_keychain: bool,
         cx: &AsyncAppContext,
     ) -> anyhow::Result<()> {
-        let was_disconnected = match *self.status().borrow() {
-            Status::SignedOut => true,
-            Status::ConnectionError
-            | Status::ConnectionLost
-            | Status::Authenticating { .. }
-            | Status::Reauthenticating { .. }
-            | Status::ReconnectionError { .. } => false,
-            Status::Connected { .. } | Status::Connecting { .. } | Status::Reconnecting { .. } => {
-                return Ok(())
-            }
-            Status::UpgradeRequired => return Err(EstablishConnectionError::UpgradeRequired)?,
-        };
-
-        if was_disconnected {
-            self.set_status(Status::Authenticating, cx);
-        } else {
-            self.set_status(Status::Reauthenticating, cx)
-        }
-
-        let mut read_from_keychain = false;
-        let mut credentials = self.state.read().credentials.clone();
-        if credentials.is_none() && try_keychain {
-            credentials = read_credentials_from_keychain(cx);
-            read_from_keychain = credentials.is_some();
-            if read_from_keychain {
-                cx.read(|cx| {
-                    self.report_event(
-                        "read credentials from keychain",
-                        Default::default(),
-                        cx.global::<Settings>().telemetry(),
-                    );
-                });
-            }
-        }
-        if credentials.is_none() {
-            let mut status_rx = self.status();
-            let _ = status_rx.next().await;
-            futures::select_biased! {
-                authenticate = self.authenticate(cx).fuse() => {
-                    match authenticate {
-                        Ok(creds) => credentials = Some(creds),
-                        Err(err) => {
-                            self.set_status(Status::ConnectionError, cx);
-                            return Err(err);
-                        }
-                    }
-                }
-                _ = status_rx.next().fuse() => {
-                    return Err(anyhow!("authentication canceled"));
-                }
-            }
-        }
-        let credentials = credentials.unwrap();
-
-        if was_disconnected {
-            self.set_status(Status::Connecting, cx);
-        } else {
-            self.set_status(Status::Reconnecting, cx);
-        }
-
-        let mut timeout = cx.background().timer(CONNECTION_TIMEOUT).fuse();
-        futures::select_biased! {
-            connection = self.establish_connection(&credentials, cx).fuse() => {
-                match connection {
-                    Ok(conn) => {
-                        self.state.write().credentials = Some(credentials.clone());
-                        if !read_from_keychain && IMPERSONATE_LOGIN.is_none() {
-                            write_credentials_to_keychain(&credentials, cx).log_err();
-                        }
-
-                        futures::select_biased! {
-                            result = self.set_connection(conn, cx).fuse() => result,
-                            _ = timeout => {
-                                self.set_status(Status::ConnectionError, cx);
-                                Err(anyhow!("timed out waiting on hello message from server"))
-                            }
-                        }
-                    }
-                    Err(EstablishConnectionError::Unauthorized) => {
-                        self.state.write().credentials.take();
-                        if read_from_keychain {
-                            cx.platform().delete_credentials(&ZED_SERVER_URL).log_err();
-                            self.set_status(Status::SignedOut, cx);
-                            self.authenticate_and_connect(false, cx).await
-                        } else {
-                            self.set_status(Status::ConnectionError, cx);
-                            Err(EstablishConnectionError::Unauthorized)?
-                        }
-                    }
-                    Err(EstablishConnectionError::UpgradeRequired) => {
-                        self.set_status(Status::UpgradeRequired, cx);
-                        Err(EstablishConnectionError::UpgradeRequired)?
-                    }
-                    Err(error) => {
-                        self.set_status(Status::ConnectionError, cx);
-                        Err(error)?
-                    }
-                }
-            }
-            _ = &mut timeout => {
-                self.set_status(Status::ConnectionError, cx);
-                Err(anyhow!("timed out trying to establish connection"))
-            }
-        }
+        self.set_status(Status::ConnectionError, cx);
+        Err(anyhow!("cloud client networking is disabled in this build"))
     }
 
     async fn set_connection(
@@ -916,7 +770,7 @@ impl Client {
 
     fn establish_connection(
         self: &Arc<Self>,
-        credentials: &Credentials,
+        _credentials: &Credentials,
         cx: &AsyncAppContext,
     ) -> Task<Result<Connection, EstablishConnectionError>> {
         #[cfg(any(test, feature = "test-support"))]
@@ -924,96 +778,10 @@ impl Client {
             return callback(credentials, cx);
         }
 
-        self.establish_websocket_connection(credentials, cx)
-    }
-
-    async fn get_rpc_url(http: Arc<dyn HttpClient>, is_preview: bool) -> Result<Url> {
-        let preview_param = if is_preview { "?preview=1" } else { "" };
-        let url = format!("{}/rpc{preview_param}", *ZED_SERVER_URL);
-        let response = http.get(&url, Default::default(), false).await?;
-
-        // Normally, ZED_SERVER_URL is set to the URL of zed.dev website.
-        // The website's /rpc endpoint redirects to a collab server's /rpc endpoint,
-        // which requires authorization via an HTTP header.
-        //
-        // For testing purposes, ZED_SERVER_URL can also set to the direct URL of
-        // of a collab server. In that case, a request to the /rpc endpoint will
-        // return an 'unauthorized' response.
-        let collab_url = if response.status().is_redirection() {
-            response
-                .headers()
-                .get("Location")
-                .ok_or_else(|| anyhow!("missing location header in /rpc response"))?
-                .to_str()
-                .map_err(EstablishConnectionError::other)?
-                .to_string()
-        } else if response.status() == StatusCode::UNAUTHORIZED {
-            url
-        } else {
-            Err(anyhow!(
-                "unexpected /rpc response status {}",
-                response.status()
-            ))?
-        };
-
-        Url::parse(&collab_url).context("invalid rpc url")
-    }
-
-    fn establish_websocket_connection(
-        self: &Arc<Self>,
-        credentials: &Credentials,
-        cx: &AsyncAppContext,
-    ) -> Task<Result<Connection, EstablishConnectionError>> {
-        let is_preview = cx.read(|cx| {
-            if cx.has_global::<ReleaseChannel>() {
-                *cx.global::<ReleaseChannel>() == ReleaseChannel::Preview
-            } else {
-                false
-            }
-        });
-
-        let request = Request::builder()
-            .header(
-                "Authorization",
-                format!("{} {}", credentials.user_id, credentials.access_token),
-            )
-            .header("x-zed-protocol-version", rpc::PROTOCOL_VERSION);
-
-        let http = self.http.clone();
-        cx.background().spawn(async move {
-            let mut rpc_url = Self::get_rpc_url(http, is_preview).await?;
-            let rpc_host = rpc_url
-                .host_str()
-                .zip(rpc_url.port_or_known_default())
-                .ok_or_else(|| anyhow!("missing host in rpc url"))?;
-            let stream = smol::net::TcpStream::connect(rpc_host).await?;
-
-            log::info!("connected to rpc endpoint {}", rpc_url);
-
-            match rpc_url.scheme() {
-                "https" => {
-                    rpc_url.set_scheme("wss").unwrap();
-                    let request = request.uri(rpc_url.as_str()).body(())?;
-                    let (stream, _) =
-                        async_tungstenite::async_tls::client_async_tls(request, stream).await?;
-                    Ok(Connection::new(
-                        stream
-                            .map_err(|error| anyhow!(error))
-                            .sink_map_err(|error| anyhow!(error)),
-                    ))
-                }
-                "http" => {
-                    rpc_url.set_scheme("ws").unwrap();
-                    let request = request.uri(rpc_url.as_str()).body(())?;
-                    let (stream, _) = async_tungstenite::client_async(request, stream).await?;
-                    Ok(Connection::new(
-                        stream
-                            .map_err(|error| anyhow!(error))
-                            .sink_map_err(|error| anyhow!(error)),
-                    ))
-                }
-                _ => Err(anyhow!("invalid rpc url: {}", rpc_url))?,
-            }
+        cx.background().spawn(async {
+            Err(EstablishConnectionError::other(anyhow!(
+                "cloud client networking is disabled"
+            )))
         })
     }
 
@@ -1021,149 +789,8 @@ impl Client {
         self: &Arc<Self>,
         cx: &AsyncAppContext,
     ) -> Task<Result<Credentials>> {
-        let platform = cx.platform();
-        let executor = cx.background();
-        let telemetry = self.telemetry.clone();
-        let http = self.http.clone();
-        let metrics_enabled = cx.read(|cx| cx.global::<Settings>().telemetry());
-
-        executor.clone().spawn(async move {
-            // Generate a pair of asymmetric encryption keys. The public key will be used by the
-            // zed server to encrypt the user's access token, so that it can'be intercepted by
-            // any other app running on the user's device.
-            let (public_key, private_key) =
-                rpc::auth::keypair().expect("failed to generate keypair for auth");
-            let public_key_string =
-                String::try_from(public_key).expect("failed to serialize public key for auth");
-
-            if let Some((login, token)) = IMPERSONATE_LOGIN.as_ref().zip(ADMIN_API_TOKEN.as_ref()) {
-                return Self::authenticate_as_admin(http, login.clone(), token.clone()).await;
-            }
-
-            // Start an HTTP server to receive the redirect from Zed's sign-in page.
-            let server = tiny_http::Server::http("127.0.0.1:0").expect("failed to find open port");
-            let port = server.server_addr().port();
-
-            // Open the Zed sign-in page in the user's browser, with query parameters that indicate
-            // that the user is signing in from a Zed app running on the same device.
-            let mut url = format!(
-                "{}/native_app_signin?native_app_port={}&native_app_public_key={}",
-                *ZED_SERVER_URL, port, public_key_string
-            );
-
-            if let Some(impersonate_login) = IMPERSONATE_LOGIN.as_ref() {
-                log::info!("impersonating user @{}", impersonate_login);
-                write!(&mut url, "&impersonate={}", impersonate_login).unwrap();
-            }
-
-            platform.open_url(&url);
-
-            // Receive the HTTP request from the user's browser. Retrieve the user id and encrypted
-            // access token from the query params.
-            //
-            // TODO - Avoid ever starting more than one HTTP server. Maybe switch to using a
-            // custom URL scheme instead of this local HTTP server.
-            let (user_id, access_token) = executor
-                .spawn(async move {
-                    for _ in 0..100 {
-                        if let Some(req) = server.recv_timeout(Duration::from_secs(1))? {
-                            let path = req.url();
-                            let mut user_id = None;
-                            let mut access_token = None;
-                            let url = Url::parse(&format!("http://example.com{}", path))
-                                .context("failed to parse login notification url")?;
-                            for (key, value) in url.query_pairs() {
-                                if key == "access_token" {
-                                    access_token = Some(value.to_string());
-                                } else if key == "user_id" {
-                                    user_id = Some(value.to_string());
-                                }
-                            }
-
-                            let post_auth_url =
-                                format!("{}/native_app_signin_succeeded", *ZED_SERVER_URL);
-                            req.respond(
-                                tiny_http::Response::empty(302).with_header(
-                                    tiny_http::Header::from_bytes(
-                                        &b"Location"[..],
-                                        post_auth_url.as_bytes(),
-                                    )
-                                    .unwrap(),
-                                ),
-                            )
-                            .context("failed to respond to login http request")?;
-                            return Ok((
-                                user_id.ok_or_else(|| anyhow!("missing user_id parameter"))?,
-                                access_token
-                                    .ok_or_else(|| anyhow!("missing access_token parameter"))?,
-                            ));
-                        }
-                    }
-
-                    Err(anyhow!("didn't receive login redirect"))
-                })
-                .await?;
-
-            let access_token = private_key
-                .decrypt_string(&access_token)
-                .context("failed to decrypt access token")?;
-            platform.activate(true);
-
-            telemetry.report_event(
-                "authenticate with browser",
-                Default::default(),
-                metrics_enabled,
-            );
-
-            Ok(Credentials {
-                user_id: user_id.parse()?,
-                access_token,
-            })
-        })
-    }
-
-    async fn authenticate_as_admin(
-        http: Arc<dyn HttpClient>,
-        login: String,
-        mut api_token: String,
-    ) -> Result<Credentials> {
-        #[derive(Deserialize)]
-        struct AuthenticatedUserResponse {
-            user: User,
-        }
-
-        #[derive(Deserialize)]
-        struct User {
-            id: u64,
-        }
-
-        // Use the collab server's admin API to retrieve the id
-        // of the impersonated user.
-        let mut url = Self::get_rpc_url(http.clone(), false).await?;
-        url.set_path("/user");
-        url.set_query(Some(&format!("github_login={login}")));
-        let request = Request::get(url.as_str())
-            .header("Authorization", format!("token {api_token}"))
-            .body("".into())?;
-
-        let mut response = http.send(request).await?;
-        let mut body = String::new();
-        response.body_mut().read_to_string(&mut body).await?;
-        if !response.status().is_success() {
-            Err(anyhow!(
-                "admin user request failed {} - {}",
-                response.status().as_u16(),
-                body,
-            ))?;
-        }
-        let response: AuthenticatedUserResponse = serde_json::from_str(&body)?;
-
-        // Use the admin API token to authenticate as the impersonated user.
-        api_token.insert_str(0, "ADMIN_TOKEN:");
-        Ok(Credentials {
-            user_id: response.user.id,
-            access_token: api_token,
-        })
+        cx.background()
+            .spawn(async { Err(anyhow!("authentication is disabled in this build")) })
     }
 
     pub fn disconnect(self: &Arc<Self>, cx: &AsyncAppContext) {
@@ -1315,9 +942,7 @@ impl Client {
         }
     }
 
-    pub fn start_telemetry(&self) {
-        self.telemetry.start();
-    }
+    pub fn start_telemetry(&self) {}
 
     pub fn report_event(
         &self,
@@ -1325,20 +950,19 @@ impl Client {
         properties: Value,
         telemetry_settings: TelemetrySettings,
     ) {
-        self.telemetry
-            .report_event(kind, properties.clone(), telemetry_settings);
+        let _ = (kind, properties, telemetry_settings);
     }
 
     pub fn telemetry_log_file_path(&self) -> Option<PathBuf> {
-        self.telemetry.log_file_path()
+        None
     }
 
     pub fn metrics_id(&self) -> Option<Arc<str>> {
-        self.telemetry.metrics_id()
+        None
     }
 
     pub fn is_staff(&self) -> Option<bool> {
-        self.telemetry.is_staff()
+        None
     }
 }
 
@@ -1350,30 +974,6 @@ impl WeakSubscriber {
             WeakSubscriber::Pending(_) => None,
         }
     }
-}
-
-fn read_credentials_from_keychain(cx: &AsyncAppContext) -> Option<Credentials> {
-    if IMPERSONATE_LOGIN.is_some() {
-        return None;
-    }
-
-    let (user_id, access_token) = cx
-        .platform()
-        .read_credentials(&ZED_SERVER_URL)
-        .log_err()
-        .flatten()?;
-    Some(Credentials {
-        user_id: user_id.parse().ok()?,
-        access_token: String::from_utf8(access_token).ok()?,
-    })
-}
-
-fn write_credentials_to_keychain(credentials: &Credentials, cx: &AsyncAppContext) -> Result<()> {
-    cx.platform().write_credentials(
-        &ZED_SERVER_URL,
-        &credentials.user_id.to_string(),
-        credentials.access_token.as_bytes(),
-    )
 }
 
 const WORKTREE_URL_PREFIX: &str = "zed://worktrees/";

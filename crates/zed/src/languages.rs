@@ -13,7 +13,6 @@ mod github;
 mod go;
 mod html;
 mod json;
-mod language_plugin;
 mod lua;
 mod node_runtime;
 mod python;

@@ -2,9 +2,6 @@ use std::ops::Range;
 use sum_tree::SumTree;
 use text::{Anchor, BufferSnapshot, OffsetRangeExt, Point};
 
-pub use git2 as libgit;
-use libgit::{DiffLineType as GitDiffLineType, DiffOptions as GitOptions, Patch as GitPatch};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiffHunkStatus {
     Added,
@@ -133,14 +130,8 @@ impl BufferDiff {
         let mut tree = SumTree::new();
 
         let buffer_text = buffer.as_rope().to_string();
-        let patch = Self::diff(&diff_base, &buffer_text);
-
-        if let Some(patch) = patch {
-            let mut divergence = 0;
-            for hunk_index in 0..patch.num_hunks() {
-                let hunk = Self::process_patch_hunk(&patch, hunk_index, buffer, &mut divergence);
-                tree.push(hunk, buffer);
-            }
+        for hunk in Self::diff(diff_base, &buffer_text, buffer) {
+            tree.push(hunk, buffer);
         }
 
         self.tree = tree;
@@ -154,93 +145,78 @@ impl BufferDiff {
         self.hunks_intersecting_range(start..end, text, false)
     }
 
-    fn diff<'a>(head: &'a str, current: &'a str) -> Option<GitPatch<'a>> {
-        let mut options = GitOptions::default();
-        options.context_lines(0);
-
-        let patch = GitPatch::from_buffers(
-            head.as_bytes(),
-            None,
-            current.as_bytes(),
-            None,
-            Some(&mut options),
-        );
-
-        match patch {
-            Ok(patch) => Some(patch),
-
-            Err(err) => {
-                log::error!("`GitPatch::from_buffers` failed: {}", err);
-                None
-            }
-        }
-    }
-
-    fn process_patch_hunk<'a>(
-        patch: &GitPatch<'a>,
-        hunk_index: usize,
+    fn diff(
+        diff_base: &str,
+        current: &str,
         buffer: &text::BufferSnapshot,
-        buffer_row_divergence: &mut i64,
-    ) -> DiffHunk<Anchor> {
-        let line_item_count = patch.num_lines_in_hunk(hunk_index).unwrap();
-        assert!(line_item_count > 0);
+    ) -> Vec<DiffHunk<Anchor>> {
+        let diff_base_line_offsets = line_start_offsets(diff_base);
+        similar::TextDiff::from_lines(diff_base, current)
+            .grouped_ops(0)
+            .into_iter()
+            .filter_map(|group| {
+                let mut old_range: Option<Range<usize>> = None;
+                let mut buffer_row_range: Option<Range<u32>> = None;
 
-        let mut first_deletion_buffer_row: Option<u32> = None;
-        let mut buffer_row_range: Option<Range<u32>> = None;
-        let mut diff_base_byte_range: Option<Range<usize>> = None;
+                for operation in group {
+                    let old_operation_range = operation.old_range();
+                    let new_operation_range = operation.new_range();
 
-        for line_index in 0..line_item_count {
-            let line = patch.line_in_hunk(hunk_index, line_index).unwrap();
-            let kind = line.origin_value();
-            let content_offset = line.content_offset() as isize;
-            let content_len = line.content().len() as isize;
+                    if !old_operation_range.is_empty() {
+                        old_range = Some(match old_range {
+                            Some(old_range) => {
+                                old_range.start.min(old_operation_range.start)
+                                    ..old_range.end.max(old_operation_range.end)
+                            }
+                            None => old_operation_range,
+                        });
+                    }
 
-            if kind == GitDiffLineType::Addition {
-                *buffer_row_divergence += 1;
-                let row = line.new_lineno().unwrap().saturating_sub(1);
-
-                match &mut buffer_row_range {
-                    Some(buffer_row_range) => buffer_row_range.end = row + 1,
-                    None => buffer_row_range = Some(row..row + 1),
-                }
-            }
-
-            if kind == GitDiffLineType::Deletion {
-                let end = content_offset + content_len;
-
-                match &mut diff_base_byte_range {
-                    Some(head_byte_range) => head_byte_range.end = end as usize,
-                    None => diff_base_byte_range = Some(content_offset as usize..end as usize),
-                }
-
-                if first_deletion_buffer_row.is_none() {
-                    let old_row = line.old_lineno().unwrap().saturating_sub(1);
-                    let row = old_row as i64 + *buffer_row_divergence;
-                    first_deletion_buffer_row = Some(row as u32);
+                    if !new_operation_range.is_empty() {
+                        let operation_buffer_range =
+                            new_operation_range.start as u32..new_operation_range.end as u32;
+                        buffer_row_range = Some(match buffer_row_range {
+                            Some(buffer_row_range) => {
+                                buffer_row_range.start.min(operation_buffer_range.start)
+                                    ..buffer_row_range.end.max(operation_buffer_range.end)
+                            }
+                            None => operation_buffer_range,
+                        });
+                    }
                 }
 
-                *buffer_row_divergence -= 1;
-            }
-        }
+                let old_range = old_range.unwrap_or(0..0);
+                let buffer_row_range = buffer_row_range
+                    .unwrap_or_else(|| old_range.start as u32..old_range.start as u32);
 
-        //unwrap_or deletion without addition
-        let buffer_row_range = buffer_row_range.unwrap_or_else(|| {
-            //we cannot have an addition-less hunk without deletion(s) or else there would be no hunk
-            let row = first_deletion_buffer_row.unwrap();
-            row..row
-        });
+                let diff_base_byte_range = if old_range.is_empty() {
+                    0..0
+                } else {
+                    diff_base_line_offsets[old_range.start]..diff_base_line_offsets[old_range.end]
+                };
 
-        //unwrap_or addition without deletion
-        let diff_base_byte_range = diff_base_byte_range.unwrap_or(0..0);
+                let start = Point::new(buffer_row_range.start, 0);
+                let end = Point::new(buffer_row_range.end, 0);
+                Some(DiffHunk {
+                    buffer_range: buffer.anchor_before(start)..buffer.anchor_before(end),
+                    diff_base_byte_range,
+                })
+            })
+            .collect()
+    }
+}
 
-        let start = Point::new(buffer_row_range.start, 0);
-        let end = Point::new(buffer_row_range.end, 0);
-        let buffer_range = buffer.anchor_before(start)..buffer.anchor_before(end);
-        DiffHunk {
-            buffer_range,
-            diff_base_byte_range,
+fn line_start_offsets(text: &str) -> Vec<usize> {
+    let mut offsets = vec![0];
+    for (index, byte) in text.bytes().enumerate() {
+        if byte == b'\n' {
+            offsets.push(index + 1);
         }
     }
+    if offsets.last().copied() != Some(text.len()) {
+        offsets.push(text.len());
+    }
+    offsets
 }
 
 /// Range (crossing new lines), old, new

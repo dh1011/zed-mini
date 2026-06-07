@@ -19,7 +19,6 @@ gpui = { path = "../gpui", optional = true }
 util = { path = "../util" }
 anyhow = "1.0"
 async-lock = "2.4"
-async-tungstenite = "0.16"
 base64 = "0.13"
 futures = "0.3"
 parking_lot = "0.11.1"

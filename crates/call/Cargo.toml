@@ -13,9 +13,7 @@ test-support = [
     "client/test-support",
     "collections/test-support",
     "gpui/test-support",
-    "live_kit_client/test-support",
     "project/test-support",
-    "util/test-support"
 ]
 
 [dependencies]
@@ -23,17 +21,9 @@ client = { path = "../client" }
 collections = { path = "../collections" }
 gpui = { path = "../gpui" }
 log = "0.4"
-live_kit_client = { path = "../live_kit_client" }
-fs = { path = "../fs" }
-language = { path = "../language" }
-media = { path = "../media" }
 project = { path = "../project" }
-settings = { path = "../settings" }
-util = { path = "../util" }
 
 anyhow = "1.0.38"
-async-broadcast = "0.4"
-futures = "0.3"
 postage = { workspace = true }
 
 [dev-dependencies]
@@ -42,6 +32,5 @@ fs = { path = "../fs", features = ["test-support"] }
 language = { path = "../language", features = ["test-support"] }
 collections = { path = "../collections", features = ["test-support"] }
 gpui = { path = "../gpui", features = ["test-support"] }
-live_kit_client = { path = "../live_kit_client", features = ["test-support"] }
 project = { path = "../project", features = ["test-support"] }
 util = { path = "../util", features = ["test-support"] }

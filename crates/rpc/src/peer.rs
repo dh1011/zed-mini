@@ -538,8 +538,8 @@ impl Serialize for Peer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::conn::WebSocketMessage;
     use crate::TypedEnvelope;
-    use async_tungstenite::tungstenite::Message as WebSocketMessage;
     use gpui::TestAppContext;
 
     #[ctor::ctor]

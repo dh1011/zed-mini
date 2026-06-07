@@ -11,7 +11,6 @@ doctest = false
 [features]
 test-support = [
     "client/test-support",
-    "db/test-support",
     "language/test-support",
     "settings/test-support",
     "text/test-support",
@@ -22,7 +21,6 @@ text = { path = "../text" }
 client = { path = "../client" }
 clock = { path = "../clock" }
 collections = { path = "../collections" }
-db = { path = "../db" }
 fs = { path = "../fs" }
 fsevent = { path = "../fsevent" }
 fuzzy = { path = "../fuzzy" }
@@ -34,7 +32,6 @@ lsp = { path = "../lsp" }
 rpc = { path = "../rpc" }
 settings = { path = "../settings" }
 sum_tree = { path = "../sum_tree" }
-terminal = { path = "../terminal" }
 util = { path = "../util" }
 aho-corasick = "0.7"
 anyhow = "1.0.57"
@@ -64,7 +61,6 @@ env_logger = "0.9"
 pretty_assertions = "1.3.0"
 client = { path = "../client", features = ["test-support"] }
 collections = { path = "../collections", features = ["test-support"] }
-db = { path = "../db", features = ["test-support"] }
 fs = { path = "../fs",  features = ["test-support"] }
 gpui = { path = "../gpui", features = ["test-support"] }
 language = { path = "../language", features = ["test-support"] }

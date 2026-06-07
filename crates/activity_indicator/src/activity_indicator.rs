@@ -1,4 +1,3 @@
-use auto_update::{AutoUpdateStatus, AutoUpdater, DismissErrorMessage};
 use editor::Editor;
 use futures::StreamExt;
 use gpui::{
@@ -25,7 +24,6 @@ pub enum Event {
 pub struct ActivityIndicator {
     statuses: Vec<LspStatus>,
     project: ModelHandle<Project>,
-    auto_updater: Option<ModelHandle<AutoUpdater>>,
 }
 
 struct LspStatus {
@@ -48,7 +46,6 @@ struct Content {
 
 pub fn init(cx: &mut MutableAppContext) {
     cx.add_action(ActivityIndicator::show_error_message);
-    cx.add_action(ActivityIndicator::dismiss_error_message);
 }
 
 impl ActivityIndicator {
@@ -58,7 +55,6 @@ impl ActivityIndicator {
         cx: &mut ViewContext<Workspace>,
     ) -> ViewHandle<ActivityIndicator> {
         let project = workspace.project().clone();
-        let auto_updater = AutoUpdater::get(cx);
         let this = cx.add_view(|cx: &mut ViewContext<Self>| {
             let mut status_events = languages.language_server_binary_statuses();
             cx.spawn_weak(|this, mut cx| async move {
@@ -79,16 +75,12 @@ impl ActivityIndicator {
             })
             .detach();
             cx.observe(&project, |_, _, cx| cx.notify()).detach();
-            if let Some(auto_updater) = auto_updater.as_ref() {
-                cx.observe(auto_updater, |_, _, cx| cx.notify()).detach();
-            }
             cx.observe_active_labeled_tasks(|_, cx| cx.notify())
                 .detach();
 
             Self {
                 statuses: Default::default(),
                 project: project.clone(),
-                auto_updater,
             }
         });
         cx.subscribe(&this, move |workspace, _, event, cx| match event {
@@ -130,15 +122,6 @@ impl ActivityIndicator {
             }
         });
 
-        cx.notify();
-    }
-
-    fn dismiss_error_message(&mut self, _: &DismissErrorMessage, cx: &mut ViewContext<Self>) {
-        if let Some(updater) = &self.auto_updater {
-            updater.update(cx, |updater, cx| {
-                updater.dismiss_error(cx);
-            });
-        }
         cx.notify();
     }
 
@@ -256,38 +239,6 @@ impl ActivityIndicator {
                     if failed.len() > 1 { "s" } else { "" }
                 ),
                 action: Some(Box::new(ShowErrorMessage)),
-            };
-        }
-
-        // Show any application auto-update info.
-        if let Some(updater) = &self.auto_updater {
-            return match &updater.read(cx).status() {
-                AutoUpdateStatus::Checking => Content {
-                    icon: Some(DOWNLOAD_ICON),
-                    message: "Checking for Zed updates…".to_string(),
-                    action: None,
-                },
-                AutoUpdateStatus::Downloading => Content {
-                    icon: Some(DOWNLOAD_ICON),
-                    message: "Downloading Zed update…".to_string(),
-                    action: None,
-                },
-                AutoUpdateStatus::Installing => Content {
-                    icon: Some(DOWNLOAD_ICON),
-                    message: "Installing Zed update…".to_string(),
-                    action: None,
-                },
-                AutoUpdateStatus::Updated => Content {
-                    icon: None,
-                    message: "Click to restart and update Zed".to_string(),
-                    action: Some(Box::new(workspace::Restart)),
-                },
-                AutoUpdateStatus::Errored => Content {
-                    icon: Some(WARNING_ICON),
-                    message: "Auto update failed".to_string(),
-                    action: Some(Box::new(DismissErrorMessage)),
-                },
-                AutoUpdateStatus::Idle => Default::default(),
             };
         }
 

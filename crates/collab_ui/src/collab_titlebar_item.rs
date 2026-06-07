@@ -4,7 +4,7 @@ use crate::{
     ToggleScreenSharing,
 };
 use call::{ActiveCall, ParticipantLocation, Room};
-use client::{proto::PeerId, ContactEventKind, SignIn, SignOut, User, UserStore};
+use client::{proto::PeerId, ContactEventKind, SignOut, User, UserStore};
 use clock::ReplicaId;
 use contacts_popover::ContactsPopover;
 use context_menu::{ContextMenu, ContextMenuItem};
@@ -121,9 +121,6 @@ impl View for CollabTitlebarItem {
         if matches!(status, client::Status::Connected { .. }) {
             right_container.add_child(self.render_toggle_contacts_button(&theme, cx));
             right_container.add_child(self.render_user_menu_button(&theme, cx));
-        } else {
-            right_container.add_children(self.render_connection_status(status, cx));
-            right_container.add_child(self.render_sign_in_button(&theme, cx));
         }
 
         Stack::new()
@@ -311,16 +308,10 @@ impl CollabTitlebarItem {
                     },
                 ]
             } else {
-                vec![
-                    ContextMenuItem::Item {
-                        label: "Sign in".into(),
-                        action: Box::new(SignIn),
-                    },
-                    ContextMenuItem::Item {
-                        label: "Send Feedback".into(),
-                        action: Box::new(feedback::feedback_editor::GiveFeedback),
-                    },
-                ]
+                vec![ContextMenuItem::Item {
+                    label: "Send Feedback".into(),
+                    action: Box::new(feedback::feedback_editor::GiveFeedback),
+                }]
             };
 
             user_menu.show(Default::default(), AnchorCorner::TopRight, items, cx);
@@ -544,22 +535,6 @@ impl CollabTitlebarItem {
                     .boxed(),
             )
             .boxed()
-    }
-
-    fn render_sign_in_button(&self, theme: &Theme, cx: &mut RenderContext<Self>) -> ElementBox {
-        let titlebar = &theme.workspace.titlebar;
-        MouseEventHandler::<SignIn>::new(0, cx, |state, _| {
-            let style = titlebar.sign_in_prompt.style_for(state, false);
-            Label::new("Sign In", style.text.clone())
-                .contained()
-                .with_style(style.container)
-                .boxed()
-        })
-        .with_cursor_style(CursorStyle::PointingHand)
-        .on_click(MouseButton::Left, move |_, cx| {
-            cx.dispatch_action(SignIn);
-        })
-        .boxed()
     }
 
     fn render_contacts_popover_host<'a>(
@@ -846,56 +821,6 @@ impl CollabTitlebarItem {
             .with_height(avatar_style.outer_width)
             .aligned()
             .boxed()
-    }
-
-    fn render_connection_status(
-        &self,
-        status: &client::Status,
-        cx: &mut RenderContext<Self>,
-    ) -> Option<ElementBox> {
-        enum ConnectionStatusButton {}
-
-        let theme = &cx.global::<Settings>().theme.clone();
-        match status {
-            client::Status::ConnectionError
-            | client::Status::ConnectionLost
-            | client::Status::Reauthenticating { .. }
-            | client::Status::Reconnecting { .. }
-            | client::Status::ReconnectionError { .. } => Some(
-                Container::new(
-                    Align::new(
-                        ConstrainedBox::new(
-                            Svg::new("icons/cloud_slash_12.svg")
-                                .with_color(theme.workspace.titlebar.offline_icon.color)
-                                .boxed(),
-                        )
-                        .with_width(theme.workspace.titlebar.offline_icon.width)
-                        .boxed(),
-                    )
-                    .boxed(),
-                )
-                .with_style(theme.workspace.titlebar.offline_icon.container)
-                .boxed(),
-            ),
-            client::Status::UpgradeRequired => Some(
-                MouseEventHandler::<ConnectionStatusButton>::new(0, cx, |_, _| {
-                    Label::new(
-                        "Please update Zed to collaborate",
-                        theme.workspace.titlebar.outdated_warning.text.clone(),
-                    )
-                    .contained()
-                    .with_style(theme.workspace.titlebar.outdated_warning.container)
-                    .aligned()
-                    .boxed()
-                })
-                .with_cursor_style(CursorStyle::PointingHand)
-                .on_click(MouseButton::Left, |_, cx| {
-                    cx.dispatch_action(auto_update::Check);
-                })
-                .boxed(),
-            ),
-            _ => None,
-        }
     }
 }
 

@@ -1,6 +1,6 @@
 use super::{entity_messages, messages, request_messages, ConnectionId, TypedEnvelope};
+use crate::conn::WebSocketMessage;
 use anyhow::{anyhow, Result};
-use async_tungstenite::tungstenite::Message as WebSocketMessage;
 use futures::{SinkExt as _, StreamExt as _};
 use prost::Message as _;
 use serde::Serialize;
@@ -435,8 +435,7 @@ where
                 }
                 WebSocketMessage::Ping(_) => return Ok(Message::Ping),
                 WebSocketMessage::Pong(_) => return Ok(Message::Pong),
-                WebSocketMessage::Close(_) => break,
-                _ => {}
+                WebSocketMessage::Close => break,
             }
         }
         Err(anyhow!("connection closed"))

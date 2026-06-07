@@ -2,7 +2,6 @@ mod ignore;
 mod lsp_command;
 mod lsp_glob_set;
 pub mod search;
-pub mod terminals;
 pub mod worktree;
 
 #[cfg(test)]
@@ -63,8 +62,6 @@ use std::{
     },
     time::{Duration, Instant, SystemTime},
 };
-use terminals::Terminals;
-
 use util::{debug_panic, defer, merge_json_value_into, post_inc, ResultExt, TryFutureExt as _};
 
 pub use fs::*;
@@ -126,7 +123,6 @@ pub struct Project {
     nonce: u128,
     _maintain_buffer_languages: Task<()>,
     _maintain_workspace_config: Task<()>,
-    terminals: Terminals,
 }
 
 enum OpenBuffer {
@@ -445,9 +441,6 @@ impl Project {
             buffers_being_formatted: Default::default(),
             next_language_server_id: 0,
             nonce: StdRng::from_entropy().gen(),
-            terminals: Terminals {
-                local_handles: Vec::new(),
-            },
         })
     }
 
@@ -525,9 +518,6 @@ impl Project {
                 buffers_being_formatted: Default::default(),
                 buffer_snapshots: Default::default(),
                 nonce: StdRng::from_entropy().gen(),
-                terminals: Terminals {
-                    local_handles: Vec::new(),
-                },
             };
             for worktree in worktrees {
                 let _ = this.add_worktree(&worktree, cx);

@@ -36,11 +36,6 @@ pub fn init(app_state: Arc<AppState>, cx: &mut MutableAppContext) {
 
     cx.add_global_action(move |action: &OpenBrowser, cx| cx.platform().open_url(&action.url));
 
-    let url = format!(
-        "https://github.com/zed-industries/community/issues/new?assignees=&labels=defect%2Ctriage&template=2_bug_report.yml&environment={}", 
-        urlencoding::encode(&system_specs_text)
-    );
-
     cx.add_action(
         move |_: &mut Workspace,
               _: &CopySystemSpecsIntoClipboard,
@@ -57,25 +52,31 @@ pub fn init(app_state: Arc<AppState>, cx: &mut MutableAppContext) {
 
     cx.add_action(
         |_: &mut Workspace, _: &RequestFeature, cx: &mut ViewContext<Workspace>| {
-            let url = "https://github.com/zed-industries/community/issues/new?assignees=&labels=enhancement%2Ctriage&template=0_feature_request.yml";
-            cx.dispatch_action(OpenBrowser {
-                url: url.into(),
-            });
+            cx.prompt(
+                PromptLevel::Info,
+                "Feature request links are disabled in this build.",
+                &["OK"],
+            );
         },
     );
 
     cx.add_action(
-        move |_: &mut Workspace, _: &FileBugReport, cx: &mut ViewContext<Workspace>| {
-            cx.dispatch_action(OpenBrowser {
-                url: url.clone().into(),
-            });
+        |_: &mut Workspace, _: &FileBugReport, cx: &mut ViewContext<Workspace>| {
+            cx.prompt(
+                PromptLevel::Info,
+                "Bug report links are disabled in this build.",
+                &["OK"],
+            );
         },
     );
 
     cx.add_action(
         |_: &mut Workspace, _: &OpenZedCommunityRepo, cx: &mut ViewContext<Workspace>| {
-            let url = "https://github.com/zed-industries/community";
-            cx.dispatch_action(OpenBrowser { url: url.into() });
+            cx.prompt(
+                PromptLevel::Info,
+                "Community links are disabled in this build.",
+                &["OK"],
+            );
         },
     );
 }

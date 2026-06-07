@@ -7,8 +7,6 @@ pub fn menus() -> Vec<Menu<'static>> {
             name: "Zed",
             items: vec![
                 MenuItem::action("About Zed…", super::About),
-                MenuItem::action("Check for Updates", auto_update::Check),
-                MenuItem::separator(),
                 MenuItem::submenu(Menu {
                     name: "Preferences",
                     items: vec![
@@ -102,7 +100,6 @@ pub fn menus() -> Vec<Menu<'static>> {
                 MenuItem::separator(),
                 MenuItem::action("Project Panel", project_panel::ToggleFocus),
                 MenuItem::action("Command Palette", command_palette::Toggle),
-                MenuItem::action("Diagnostics", diagnostics::Deploy),
                 MenuItem::separator(),
             ],
         },
@@ -137,17 +134,8 @@ pub fn menus() -> Vec<Menu<'static>> {
             items: vec![
                 MenuItem::action("Command Palette", command_palette::Toggle),
                 MenuItem::separator(),
-                MenuItem::action("View Telemetry", crate::OpenTelemetryLog),
                 MenuItem::action("View Dependency Licenses", crate::OpenLicenses),
                 MenuItem::action("Show Welcome", workspace::Welcome),
-                MenuItem::separator(),
-                MenuItem::action("Give us feedback", feedback::feedback_editor::GiveFeedback),
-                MenuItem::action(
-                    "Copy System Specs Into Clipboard",
-                    feedback::CopySystemSpecsIntoClipboard,
-                ),
-                MenuItem::action("File Bug Report", feedback::FileBugReport),
-                MenuItem::action("Request Feature", feedback::RequestFeature),
                 MenuItem::separator(),
                 MenuItem::action(
                     "Documentation",

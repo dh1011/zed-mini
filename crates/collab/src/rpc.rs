@@ -1856,7 +1856,7 @@ async fn get_users(
         .into_iter()
         .map(|user| proto::User {
             id: user.id.to_proto(),
-            avatar_url: format!("https://github.com/{}.png?size=128", user.github_login),
+            avatar_url: String::new(),
             github_login: user.github_login,
         })
         .collect();
@@ -1886,7 +1886,7 @@ async fn fuzzy_search_users(
         .filter(|user| user.id != session.user_id)
         .map(|user| proto::User {
             id: user.id.to_proto(),
-            avatar_url: format!("https://github.com/{}.png?size=128", user.github_login),
+            avatar_url: String::new(),
             github_login: user.github_login,
         })
         .collect();

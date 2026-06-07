@@ -1,11 +1,10 @@
 use super::{http::HttpClient, proto, Client, Status, TypedEnvelope};
 use anyhow::{anyhow, Context, Result};
 use collections::{hash_map::Entry, HashMap, HashSet};
-use futures::{channel::mpsc, future, AsyncReadExt, Future, StreamExt};
+use futures::{channel::mpsc, future, Future, StreamExt};
 use gpui::{AsyncAppContext, Entity, ImageData, ModelContext, ModelHandle, Task};
 use postage::{sink::Sink, watch};
 use rpc::proto::{RequestMessage, UsersResponse};
-use settings::Settings;
 use std::sync::{Arc, Weak};
 use util::{StaffMode, TryFutureExt as _};
 
@@ -139,23 +138,12 @@ impl UserStore {
                                 let fetch_user = this
                                     .update(&mut cx, |this, cx| this.get_user(user_id, cx))
                                     .log_err();
-                                let fetch_metrics_id =
-                                    client.request(proto::GetPrivateUserInfo {}).log_err();
-                                let (user, info) = futures::join!(fetch_user, fetch_metrics_id);
-                                client.telemetry.set_authenticated_user_info(
-                                    info.as_ref().map(|info| info.metrics_id.clone()),
-                                    info.as_ref().map(|info| info.staff).unwrap_or(false),
-                                    cx.read(|cx| cx.global::<Settings>().telemetry()),
-                                );
+                                let user = fetch_user.await;
 
                                 cx.update(|cx| {
                                     cx.update_default_global(|staff_mode: &mut StaffMode, _| {
                                         if !staff_mode.0 {
-                                            *staff_mode = StaffMode(
-                                                info.as_ref()
-                                                    .map(|info| info.staff)
-                                                    .unwrap_or_default(),
-                                            )
+                                            *staff_mode = StaffMode(false)
                                         }
                                         ()
                                     });
@@ -630,11 +618,11 @@ impl UserStore {
 }
 
 impl User {
-    async fn new(message: proto::User, http: &dyn HttpClient) -> Arc<Self> {
+    async fn new(message: proto::User, _http: &dyn HttpClient) -> Arc<Self> {
         Arc::new(User {
             id: message.id,
             github_login: message.github_login,
-            avatar: fetch_avatar(http, &message.avatar_url).warn_on_err().await,
+            avatar: None,
         })
     }
 }
@@ -656,25 +644,4 @@ impl Contact {
             busy: contact.busy,
         })
     }
-}
-
-async fn fetch_avatar(http: &dyn HttpClient, url: &str) -> Result<Arc<ImageData>> {
-    let mut response = http
-        .get(url, Default::default(), true)
-        .await
-        .map_err(|e| anyhow!("failed to send user avatar request: {}", e))?;
-
-    if !response.status().is_success() {
-        return Err(anyhow!("avatar request failed {:?}", response.status()));
-    }
-
-    let mut body = Vec::new();
-    response
-        .body_mut()
-        .read_to_end(&mut body)
-        .await
-        .map_err(|e| anyhow!("failed to read user avatar response body: {}", e))?;
-    let format = image::guess_format(&body)?;
-    let image = image::load_from_memory_with_format(&body, format)?.into_bgra8();
-    Ok(ImageData::new(image))
 }

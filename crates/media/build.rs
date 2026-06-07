@@ -1,39 +1,54 @@
-use std::{env, path::PathBuf, process::Command};
+use std::{env, path::PathBuf};
 
 fn main() {
-    let sdk_path = String::from_utf8(
-        Command::new("xcrun")
-            .args(["--sdk", "macosx", "--show-sdk-path"])
-            .output()
-            .unwrap()
-            .stdout,
-    )
-    .unwrap();
-    let sdk_path = sdk_path.trim_end();
-
     println!("cargo:rerun-if-changed=src/bindings.h");
-    let bindings = bindgen::Builder::default()
-        .header("src/bindings.h")
-        .clang_arg(format!("-isysroot{}", sdk_path))
-        .clang_arg("-xobjective-c")
-        .allowlist_type("CMItemIndex")
-        .allowlist_type("CMSampleTimingInfo")
-        .allowlist_type("CMVideoCodecType")
-        .allowlist_type("VTEncodeInfoFlags")
-        .allowlist_function("CMTimeMake")
-        .allowlist_var("kCVPixelFormatType_.*")
-        .allowlist_var("kCVReturn.*")
-        .allowlist_var("VTEncodeInfoFlags_.*")
-        .allowlist_var("kCMVideoCodecType_.*")
-        .allowlist_var("kCMTime.*")
-        .allowlist_var("kCMSampleAttachmentKey_.*")
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks))
-        .layout_tests(false)
-        .generate()
-        .expect("unable to generate bindings");
-
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
-    bindings
-        .write_to_file(out_path.join("bindings.rs"))
+    std::fs::write(out_path.join("bindings.rs"), bindings())
         .expect("couldn't write dispatch bindings");
+}
+
+fn bindings() -> &'static str {
+    r#"
+pub type UInt32 = ::std::os::raw::c_uint;
+pub type FourCharCode = UInt32;
+pub type CFIndex = ::std::os::raw::c_long;
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct __CFString {
+    _unused: [u8; 0],
+}
+pub type CFStringRef = *const __CFString;
+
+pub type CMItemIndex = CFIndex;
+pub type CMTimeValue = i64;
+pub type CMTimeScale = i32;
+pub type CMTimeEpoch = i64;
+pub type CMTimeFlags = u32;
+pub type CMVideoCodecType = FourCharCode;
+pub type VTEncodeInfoFlags = UInt32;
+
+#[repr(C, packed(4))]
+#[derive(Debug, Copy, Clone)]
+pub struct CMTime {
+    pub value: CMTimeValue,
+    pub timescale: CMTimeScale,
+    pub flags: CMTimeFlags,
+    pub epoch: CMTimeEpoch,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct CMSampleTimingInfo {
+    pub duration: CMTime,
+    pub presentationTimeStamp: CMTime,
+    pub decodeTimeStamp: CMTime,
+}
+
+extern "C" {
+    pub static kCMTimeInvalid: CMTime;
+    pub static kCMSampleAttachmentKey_NotSync: CFStringRef;
+    pub fn CMTimeMake(value: i64, timescale: i32) -> CMTime;
+}
+"#
 }

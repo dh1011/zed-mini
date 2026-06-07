@@ -1,5 +1,12 @@
-use async_tungstenite::tungstenite::Message as WebSocketMessage;
 use futures::{SinkExt as _, StreamExt as _};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WebSocketMessage {
+    Binary(Vec<u8>),
+    Ping(Vec<u8>),
+    Pong(Vec<u8>),
+    Close,
+}
 
 pub struct Connection {
     pub(crate) tx:

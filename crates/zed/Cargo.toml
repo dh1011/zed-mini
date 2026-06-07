@@ -18,20 +18,14 @@ path = "src/main.rs"
 [dependencies]
 activity_indicator = { path = "../activity_indicator" }
 assets = { path = "../assets" }
-auto_update = { path = "../auto_update" }
 breadcrumbs = { path = "../breadcrumbs" }
-call = { path = "../call" }
 cli = { path = "../cli" }
-collab_ui = { path = "../collab_ui" }
 collections = { path = "../collections" }
 command_palette = { path = "../command_palette" }
 context_menu = { path = "../context_menu" }
 client = { path = "../client" }
 clock = { path = "../clock" }
-diagnostics = { path = "../diagnostics" }
-db = { path = "../db" }
 editor = { path = "../editor" }
-feedback = { path = "../feedback" }
 file_finder = { path = "../file_finder" }
 search = { path = "../search" }
 fs = { path = "../fs" }
@@ -45,7 +39,6 @@ language = { path = "../language" }
 language_selector = { path = "../language_selector" }
 lsp = { path = "../lsp" }
 outline = { path = "../outline" }
-plugin_runtime = { path = "../plugin_runtime" }
 project = { path = "../project" }
 project_panel = { path = "../project_panel" }
 project_symbols = { path = "../project_symbols" }
@@ -54,12 +47,10 @@ rpc = { path = "../rpc" }
 settings = { path = "../settings" }
 sum_tree = { path = "../sum_tree" }
 text = { path = "../text" }
-terminal_view = { path = "../terminal_view" }
 theme = { path = "../theme" }
 theme_selector = { path = "../theme_selector" }
 theme_testbench = { path = "../theme_testbench" }
 util = { path = "../util" }
-vim = { path = "../vim" }
 workspace = { path = "../workspace" }
 welcome = { path = "../welcome" }
 anyhow = "1.0.38"
@@ -96,7 +87,6 @@ smallvec = { version = "1.6", features = ["union"] }
 smol = "1.2.5"
 tempdir = { version = "0.3.7" }
 thiserror = "1.0.29"
-tiny_http = "0.8"
 toml = "0.5"
 tree-sitter = "0.20"
 tree-sitter-c = "0.20.1"

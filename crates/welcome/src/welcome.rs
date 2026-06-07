@@ -2,7 +2,6 @@ mod base_keymap_picker;
 
 use std::{borrow::Cow, sync::Arc};
 
-use db::kvp::KEY_VALUE_STORE;
 use gpui::{
     elements::{Flex, Label, MouseEventHandler, ParentElement},
     Action, Element, ElementBox, Entity, MouseButton, MutableAppContext, RenderContext,
@@ -37,10 +36,6 @@ pub fn show_welcome_experience(app_state: &Arc<AppState>, cx: &mut MutableAppCon
         cx.notify();
     })
     .detach();
-
-    db::write_and_log(cx, || {
-        KEY_VALUE_STORE.write_kvp(FIRST_OPEN.to_string(), "false".to_string())
-    });
 }
 
 pub struct WelcomePage {

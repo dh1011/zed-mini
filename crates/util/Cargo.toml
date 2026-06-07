@@ -9,7 +9,7 @@ path = "src/util.rs"
 doctest = false
 
 [features]
-test-support = ["tempdir", "git2"]
+test-support = ["tempdir"]
 
 [dependencies]
 anyhow = "1.0.38"
@@ -20,9 +20,7 @@ lazy_static = "1.4.0"
 rand = { workspace = true }
 tempdir = { version = "0.3.7", optional = true }
 serde_json = { version = "1.0", features = ["preserve_order"] }
-git2 = { version = "0.15", default-features = false, optional = true }
 dirs = "3.0"
 
 [dev-dependencies]
 tempdir = { version = "0.3.7" }
-git2 = { version = "0.15", default-features = false }

@@ -6,14 +6,10 @@ use anyhow::Context;
 use assets::Assets;
 use breadcrumbs::Breadcrumbs;
 pub use client;
-use collab_ui::{CollabTitlebarItem, ToggleContactsMenu};
 use collections::VecDeque;
 pub use editor;
 use editor::{Editor, MultiBuffer};
 
-use feedback::{
-    feedback_info_text::FeedbackInfoText, submit_feedback_button::SubmitFeedbackButton,
-};
 use futures::StreamExt;
 use gpui::{
     actions,
@@ -31,7 +27,6 @@ use serde::Deserialize;
 use serde_json::to_string_pretty;
 use settings::Settings;
 use std::{borrow::Cow, env, path::Path, str, sync::Arc};
-use terminal_view::terminal_button::{self, TerminalButton};
 use util::{channel::ReleaseChannel, paths, ResultExt};
 use uuid::Uuid;
 pub use workspace;
@@ -59,7 +54,6 @@ actions!(
         OpenSettings,
         OpenLog,
         OpenLicenses,
-        OpenTelemetryLog,
         OpenKeymap,
         OpenDefaultSettings,
         OpenDefaultKeymap,
@@ -73,7 +67,6 @@ actions!(
 const MIN_FONT_SIZE: f32 = 6.0;
 
 pub fn init(app_state: &Arc<AppState>, cx: &mut gpui::MutableAppContext) {
-    terminal_button::init(cx);
     cx.add_action(about);
     cx.add_global_action(|_: &Hide, cx: &mut gpui::MutableAppContext| {
         cx.platform().hide();
@@ -97,20 +90,6 @@ pub fn init(app_state: &Arc<AppState>, cx: &mut gpui::MutableAppContext) {
     cx.add_action(
         |_: &mut Workspace, _: &ToggleFullScreen, cx: &mut ViewContext<Workspace>| {
             cx.toggle_full_screen();
-        },
-    );
-    cx.add_action(
-        |workspace: &mut Workspace, _: &ToggleContactsMenu, cx: &mut ViewContext<Workspace>| {
-            if let Some(item) = workspace
-                .titlebar_item()
-                .and_then(|item| item.downcast::<CollabTitlebarItem>())
-            {
-                cx.as_mut().defer(move |cx| {
-                    item.update(cx, |item, cx| {
-                        item.toggle_contacts_popover(&Default::default(), cx);
-                    });
-                });
-            }
         },
     );
     cx.add_global_action(quit);
@@ -180,12 +159,6 @@ pub fn init(app_state: &Arc<AppState>, cx: &mut gpui::MutableAppContext) {
                 "Markdown",
                 cx,
             );
-        }
-    });
-    cx.add_action({
-        let app_state = app_state.clone();
-        move |workspace: &mut Workspace, _: &OpenTelemetryLog, cx: &mut ViewContext<Workspace>| {
-            open_telemetry_log_file(workspace, app_state.clone(), cx);
         }
     });
     cx.add_action({
@@ -261,7 +234,6 @@ pub fn init(app_state: &Arc<AppState>, cx: &mut gpui::MutableAppContext) {
         },
     );
     activity_indicator::init(cx);
-    call::init(app_state.client.clone(), app_state.user_store.clone(), cx);
     settings::KeymapFileContent::load_defaults(cx);
 }
 
@@ -282,10 +254,6 @@ pub fn initialize_workspace(
                         toolbar.add_item(buffer_search_bar, cx);
                         let project_search_bar = cx.add_view(|_| ProjectSearchBar::new());
                         toolbar.add_item(project_search_bar, cx);
-                        let submit_feedback_button = cx.add_view(|_| SubmitFeedbackButton::new());
-                        toolbar.add_item(submit_feedback_button, cx);
-                        let feedback_info_text = cx.add_view(|_| FeedbackInfoText::new());
-                        toolbar.add_item(feedback_info_text, cx);
                     })
                 });
             }
@@ -295,10 +263,6 @@ pub fn initialize_workspace(
 
     cx.emit(workspace::Event::PaneAdded(workspace.active_pane().clone()));
     cx.emit(workspace::Event::PaneAdded(workspace.dock_pane().clone()));
-
-    let collab_titlebar_item =
-        cx.add_view(|cx| CollabTitlebarItem::new(&workspace_handle, &app_state.user_store, cx));
-    workspace.set_titlebar_item(collab_titlebar_item, cx);
 
     let project_panel = ProjectPanel::new(workspace.project().clone(), cx);
     workspace.left_sidebar().update(cx, |sidebar, cx| {
@@ -310,28 +274,15 @@ pub fn initialize_workspace(
         )
     });
 
-    let toggle_terminal = cx.add_view(|cx| TerminalButton::new(workspace_handle.clone(), cx));
-    let diagnostic_summary =
-        cx.add_view(|cx| diagnostics::items::DiagnosticIndicator::new(workspace.project(), cx));
     let activity_indicator =
         activity_indicator::ActivityIndicator::new(workspace, app_state.languages.clone(), cx);
     let active_buffer_language = cx.add_view(|_| language_selector::ActiveBufferLanguage::new());
-    let feedback_button =
-        cx.add_view(|_| feedback::deploy_feedback_button::DeployFeedbackButton::new());
     let cursor_position = cx.add_view(|_| editor::items::CursorPosition::new());
     workspace.status_bar().update(cx, |status_bar, cx| {
-        status_bar.add_left_item(diagnostic_summary, cx);
         status_bar.add_left_item(activity_indicator, cx);
-        status_bar.add_right_item(toggle_terminal, cx);
-        status_bar.add_right_item(feedback_button, cx);
         status_bar.add_right_item(active_buffer_language, cx);
         status_bar.add_right_item(cursor_position, cx);
     });
-
-    auto_update::notify_of_any_new_update(cx.weak_handle(), cx);
-
-    let window_id = cx.window_id();
-    vim::observe_keystrokes(window_id, cx);
 
     cx.on_window_should_close(|workspace, cx| {
         if let Some(task) = workspace.close(&Default::default(), cx) {
@@ -545,68 +496,6 @@ fn open_log_file(
             .detach();
         })
         .detach();
-}
-
-fn open_telemetry_log_file(
-    workspace: &mut Workspace,
-    app_state: Arc<AppState>,
-    cx: &mut ViewContext<Workspace>,
-) {
-    workspace.with_local_workspace(&app_state.clone(), cx, move |_, cx| {
-        cx.spawn_weak(|workspace, mut cx| async move {
-            let workspace = workspace.upgrade(&cx)?;
-
-            async fn fetch_log_string(app_state: &Arc<AppState>) -> Option<String> {
-                let path = app_state.client.telemetry_log_file_path()?;
-                app_state.fs.load(&path).await.log_err()
-            }
-
-            let log = fetch_log_string(&app_state).await.unwrap_or_else(|| "// No data has been collected yet".to_string());
-
-            const MAX_TELEMETRY_LOG_LEN: usize = 5 * 1024 * 1024;
-            let mut start_offset = log.len().saturating_sub(MAX_TELEMETRY_LOG_LEN);
-            if let Some(newline_offset) = log[start_offset..].find('\n') {
-                start_offset += newline_offset + 1;
-            }
-            let log_suffix = &log[start_offset..];
-            let json = app_state.languages.language_for_name("JSON").await.log_err();
-
-            workspace.update(&mut cx, |workspace, cx| {
-                let project = workspace.project().clone();
-                let buffer = project
-                    .update(cx, |project, cx| project.create_buffer("", None, cx))
-                    .expect("creating buffers on a local workspace always succeeds");
-                buffer.update(cx, |buffer, cx| {
-                    buffer.set_language(json, cx);
-                    buffer.edit(
-                        [(
-                            0..0,
-                            concat!(
-                                "// Zed collects anonymous usage data to help us understand how people are using the app.\n",
-                                "// Telemetry can be disabled via the `settings.json` file.\n",
-                                "// Here is the data that has been reported for the current session:\n",
-                                "\n"
-                            ),
-                        )],
-                        None,
-                        cx,
-                    );
-                    buffer.edit([(buffer.len()..buffer.len(), log_suffix)], None, cx);
-                });
-
-                let buffer = cx.add_model(|cx| {
-                    MultiBuffer::singleton(buffer, cx).with_title("Telemetry Log".into())
-                });
-                workspace.add_item(
-                    Box::new(cx.add_view(|cx| Editor::for_multibuffer(buffer, Some(project), cx))),
-                    cx,
-                );
-            });
-
-            Some(())
-        })
-        .detach();
-    }).detach();
 }
 
 fn open_bundled_file(
@@ -1870,7 +1759,6 @@ mod tests {
             let state = Arc::get_mut(&mut app_state).unwrap();
             state.initialize_workspace = initialize_workspace;
             state.build_window_options = build_window_options;
-            call::init(app_state.client.clone(), app_state.user_store.clone(), cx);
             workspace::init(app_state.clone(), cx);
             editor::init(cx);
             pane::init(cx);

@@ -9,7 +9,6 @@ pub mod pane;
 pub mod pane_group;
 mod persistence;
 pub mod searchable;
-pub mod shared_screen;
 pub mod sidebar;
 mod status_bar;
 mod toolbar;
@@ -59,7 +58,7 @@ use std::{
 };
 
 use crate::{
-    notifications::simple_message_notification::{MessageNotification, OsOpen},
+    notifications::simple_message_notification::MessageNotification,
     persistence::model::{SerializedPane, SerializedPaneGroup, SerializedWorkspace},
 };
 use lazy_static::lazy_static;
@@ -76,7 +75,6 @@ use postage::prelude::Stream;
 use project::{Project, ProjectEntryId, ProjectPath, Worktree, WorktreeId};
 use serde::Deserialize;
 use settings::{Autosave, DockAnchor, Settings};
-use shared_screen::SharedScreen;
 use sidebar::{Sidebar, SidebarButtons, SidebarSide, ToggleSidebarItem};
 use status_bar::StatusBar;
 pub use status_bar::StatusItemView;
@@ -114,9 +112,7 @@ actions!(
         ActivateNextPane,
         FollowNextCollaborator,
         ToggleLeftSidebar,
-        NewTerminal,
         NewSearch,
-        Feedback,
         Restart,
         Welcome
     ]
@@ -137,11 +133,6 @@ pub struct ToggleFollow(pub PeerId);
 pub struct JoinProject {
     pub project_id: u64,
     pub follow_user_id: u64,
-}
-
-#[derive(Clone, PartialEq)]
-pub struct OpenSharedScreen {
-    pub peer_id: PeerId,
 }
 
 #[derive(Clone, PartialEq)]
@@ -173,7 +164,6 @@ impl_internal_actions!(
         OpenPaths,
         ToggleFollow,
         JoinProject,
-        OpenSharedScreen,
         RemoveWorktreeFromProject,
         SplitWithItem,
         SplitWithProjectEntry,
@@ -272,7 +262,6 @@ pub fn init(app_state: Arc<AppState>, cx: &mut MutableAppContext) {
     cx.add_async_action(Workspace::close);
     cx.add_global_action(Workspace::close_global);
     cx.add_async_action(Workspace::save_all);
-    cx.add_action(Workspace::open_shared_screen);
     cx.add_action(Workspace::add_folder_to_project);
     cx.add_action(Workspace::remove_folder_from_project);
     cx.add_action(
@@ -890,8 +879,6 @@ impl Workspace {
                 )
                 .1
             };
-
-            notify_if_database_failed(&workspace, &mut cx);
 
             // Call open path for each of the project paths
             // (this will bring them to the front if they were in the serialized workspace)
@@ -1581,15 +1568,6 @@ impl Workspace {
         item
     }
 
-    pub fn open_shared_screen(&mut self, action: &OpenSharedScreen, cx: &mut ViewContext<Self>) {
-        if let Some(shared_screen) =
-            self.shared_screen_for_peer(action.peer_id, &self.active_pane, cx)
-        {
-            let pane = self.active_pane.clone();
-            Pane::add_item(self, &pane, Box::new(shared_screen), false, true, None, cx);
-        }
-    }
-
     pub fn activate_item(&mut self, item: &dyn ItemHandle, cx: &mut ViewContext<Self>) -> bool {
         let result = self.panes.iter().find_map(|pane| {
             pane.read(cx)
@@ -1738,8 +1716,12 @@ impl Workspace {
     }
 
     pub fn split_pane_with_item(&mut self, action: &SplitWithItem, cx: &mut ViewContext<Self>) {
-        let Some(pane_to_split) = action.pane_to_split.upgrade(cx) else { return; };
-        let Some(from) = action.from.upgrade(cx) else { return; };
+        let Some(pane_to_split) = action.pane_to_split.upgrade(cx) else {
+            return;
+        };
+        let Some(from) = action.from.upgrade(cx) else {
+            return;
+        };
         if &pane_to_split == self.dock_pane() {
             warn!("Can't split dock pane.");
             return;
@@ -1976,8 +1958,7 @@ impl Workspace {
     }
 
     fn render_titlebar(&self, theme: &Theme, cx: &mut RenderContext<Self>) -> ElementBox {
-        // TODO: There should be a better system in place for this
-        // (https://github.com/zed-industries/zed/issues/1290)
+        // TODO: There should be a better system in place for this.
         let is_fullscreen = cx.window_is_fullscreen(cx.window_id());
         let container_theme = if is_fullscreen {
             let mut container_theme = theme.workspace.titlebar.container;
@@ -2383,24 +2364,12 @@ impl Workspace {
                             .and_then(|id| state.items_by_leader_view_id.get(&id))
                         {
                             items_to_activate.push((pane.clone(), item.boxed_clone()));
-                        } else {
-                            if let Some(shared_screen) =
-                                self.shared_screen_for_peer(leader_id, pane, cx)
-                            {
-                                items_to_activate.push((pane.clone(), Box::new(shared_screen)));
-                            }
                         }
                     }
                 }
             }
             call::ParticipantLocation::UnsharedProject => {}
-            call::ParticipantLocation::External => {
-                for (pane, _) in self.follower_states_by_leader.get(&leader_id)? {
-                    if let Some(shared_screen) = self.shared_screen_for_peer(leader_id, pane, cx) {
-                        items_to_activate.push((pane.clone(), Box::new(shared_screen)));
-                    }
-                }
-            }
+            call::ParticipantLocation::External => {}
         }
 
         for (pane, item) in items_to_activate {
@@ -2422,27 +2391,6 @@ impl Workspace {
         }
 
         None
-    }
-
-    fn shared_screen_for_peer(
-        &self,
-        peer_id: PeerId,
-        pane: &ViewHandle<Pane>,
-        cx: &mut ViewContext<Self>,
-    ) -> Option<ViewHandle<SharedScreen>> {
-        let call = self.active_call()?;
-        let room = call.read(cx).room()?.read(cx);
-        let participant = room.remote_participant_for_peer_id(peer_id)?;
-        let track = participant.tracks.values().next()?.clone();
-        let user = participant.user.clone();
-
-        for item in pane.read(cx).items_of_type::<SharedScreen>() {
-            if item.read(cx).peer_id == peer_id {
-                return Some(item);
-            }
-        }
-
-        Some(cx.add_view(|cx| SharedScreen::new(&track, peer_id, user.clone(), cx)))
     }
 
     pub fn on_window_activation_changed(&mut self, active: bool, cx: &mut ViewContext<Self>) {
@@ -2678,47 +2626,6 @@ impl Workspace {
     #[cfg(any(test, feature = "test-support"))]
     pub fn test_new(project: ModelHandle<Project>, cx: &mut ViewContext<Self>) -> Self {
         Self::new(None, 0, project, |_, _| None, || &[], cx)
-    }
-}
-
-fn notify_if_database_failed(workspace: &ViewHandle<Workspace>, cx: &mut AsyncAppContext) {
-    if (*db::ALL_FILE_DB_FAILED).load(std::sync::atomic::Ordering::Acquire) {
-        workspace.update(cx, |workspace, cx| {
-            workspace.show_notification_once(0, cx, |cx| {
-                cx.add_view(|_| {
-                    MessageNotification::new(
-                        indoc::indoc! {"
-                            Failed to load any database file :(
-                        "},
-                        OsOpen("https://github.com/zed-industries/community/issues/new?assignees=&labels=defect%2Ctriage&template=2_bug_report.yml".to_string()),
-                        "Click to let us know about this error"
-                    )
-                })
-            });
-        });
-    } else {
-        let backup_path = (*db::BACKUP_DB_PATH).read();
-        if let Some(backup_path) = &*backup_path {
-            workspace.update(cx, |workspace, cx| {
-                workspace.show_notification_once(0, cx, |cx| {
-                    cx.add_view(|_| {
-                        let backup_path = backup_path.to_string_lossy();
-                        MessageNotification::new(
-                            format!(
-                                indoc::indoc! {"
-                                Database file was corrupted :(
-                                Old database backed up to:
-                                {}
-                                "},
-                                backup_path
-                            ),
-                            OsOpen(backup_path.to_string()),
-                            "Click to show old database in finder",
-                        )
-                    })
-                });
-            });
-        }
     }
 }
 
